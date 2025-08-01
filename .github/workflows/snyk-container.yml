@@ -46,8 +46,8 @@ jobs:
           echo "⏱️ Starting base image security scan..."
           start_time=$(date +%s)
           
-          echo "🔍 Scanning Dockerfile and detecting base image automatically..."
-          snyk container test --file=Dockerfile || true
+          echo "🔍 Scanning base image ubuntu:18.04 for vulnerabilities..."
+          snyk container test ubuntu:18.04 || true
           
           end_time=$(date +%s)
           duration=$((end_time - start_time))
@@ -75,10 +75,10 @@ jobs:
           # Run Snyk Container test
           if [[ "${{ env.SNYK_CONTAINER_FAIL_ON_ISSUES }}" == "true" ]]; then
             echo "❗ Pipeline will fail if high/critical issues are found"
-            snyk container test snyk-container-demo:latest --severity-threshold=high && SCAN_RESULT=0 || SCAN_RESULT=$?
+            snyk container test snyk-container-demo:latest --file=Dockerfile --severity-threshold=high && SCAN_RESULT=0 || SCAN_RESULT=$?
           else
             echo "ℹ️ Pipeline will continue regardless of issues found (reporting only)"
-            snyk container test snyk-container-demo:latest || true
+            snyk container test snyk-container-demo:latest --file=Dockerfile || true
             SCAN_RESULT=0
           fi
           
@@ -109,7 +109,7 @@ jobs:
           echo "📊 Generating HTML report..."
           TIMESTAMP=$(date +'%Y%m%d-%H%M%S')
           REPORT_NAME="${{ github.event.repository.name }}-snyk-container-report-${TIMESTAMP}.html"
-          snyk container test snyk-container-demo:latest --json > snyk-container.json || true
+          snyk container test snyk-container-demo:latest --file=Dockerfile --json > snyk-container.json || true
           npx snyk-to-html -i snyk-container.json -o "${REPORT_NAME}"
           echo "✅ HTML report generated: ${REPORT_NAME}"
           echo "REPORT_NAME=${REPORT_NAME}" >> $GITHUB_ENV
