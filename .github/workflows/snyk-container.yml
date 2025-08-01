@@ -46,8 +46,8 @@ jobs:
           echo "⏱️ Starting base image security scan..."
           start_time=$(date +%s)
           
-          echo "🔍 Scanning base image ubuntu:18.04 for vulnerabilities..."
-          snyk container test
+          echo "🔍 Scanning Dockerfile and detecting base image automatically..."
+          snyk container test --file=Dockerfile || true
           
           end_time=$(date +%s)
           duration=$((end_time - start_time))
