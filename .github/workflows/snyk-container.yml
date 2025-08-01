@@ -51,11 +51,11 @@ jobs:
           echo "⏱️ Starting Dockerfile security scan..."
           start_time=$(date +%s)
           
-          echo "🔍 Scanning Dockerfile for security issues before build..."
+          echo "🔍 Scanning Dockerfile for container security issues before build..."
           
-          # Run Dockerfile IaC scan
-          snyk iac test Dockerfile --json > dockerfile-scan-results.json || true
-          snyk iac test Dockerfile || true
+          # Run Dockerfile container scan
+          snyk container test --file=Dockerfile --json > dockerfile-scan-results.json || true
+          snyk container test --file=Dockerfile || true
           
           end_time=$(date +%s)
           duration=$((end_time - start_time))
@@ -119,7 +119,6 @@ jobs:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
       - name: 📋 Generate SBOMs (Multiple Formats)
-        if: always()
         run: |
           echo "⏱️ Starting SBOM generation..."
           start_time=$(date +%s)
