@@ -1,0 +1,288 @@
+name: Snyk Container Security Scan
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  security-analysis:
+    name: 🛡️ Snyk Container Security Analysis
+    runs-on: ubuntu-latest
+    env:
+      ###############################################################
+      # IMPORTANT: Set the correct regional API endpoint for your Snyk account
+      # Default/Global: https://api.snyk.io
+      # US: https://api.us.snyk.io  
+      # EU: https://api.eu.snyk.io
+      # AU: https://api.au.snyk.io
+      ###############################################################
+      SNYK_API: https://api.snyk.io
+      
+      ###############################################################
+      # Set to true to fail the pipeline on high/critical severity issues (default: false)
+      # By default, the scan continues even if issues are found (exit code 0)
+      # To fail on high/critical issues, set SNYK_CONTAINER_FAIL_ON_ISSUES: true above
+      ###############################################################
+      SNYK_CONTAINER_FAIL_ON_ISSUES: false
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔧 Setup Snyk
+        uses: snyk/actions/setup@master
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 📦 Install snyk-to-html
+        run: |
+          echo "📦 Installing snyk-to-html for report generation..."
+          npm install -g snyk-to-html
+
+      - name: 🔍 Dockerfile Security Scan (Pre-Build)
+        run: |
+          echo "⏱️ Starting Dockerfile security scan..."
+          start_time=$(date +%s)
+          
+          echo "🔍 Scanning Dockerfile for security issues before build..."
+          
+          # Run Dockerfile IaC scan
+          snyk iac test Dockerfile --json > dockerfile-scan-results.json || true
+          snyk iac test Dockerfile || true
+          
+          end_time=$(date +%s)
+          duration=$((end_time - start_time))
+          echo "🔥 DOCKERFILE SCAN COMPLETED IN: $duration SECONDS 🔥"
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: 🏗️ Build Container Image
+        run: |
+          echo "⏱️ Starting container build..."
+          start_time=$(date +%s)
+          
+          echo "🏗️ Building vulnerable container image for Snyk demo..."
+          docker build -t snyk-container-demo:latest .
+          docker tag snyk-container-demo:latest snyk-container-demo:${{ github.sha }}
+          
+          echo "📊 Image details:"
+          docker images snyk-container-demo:latest
+          
+          end_time=$(date +%s)
+          duration=$((end_time - start_time))
+          echo "🔥 CONTAINER BUILD COMPLETED IN: $duration SECONDS 🔥"
+
+      - name: 🛡️ Snyk Container test (with timing)
+        run: |
+          echo "⏱️ Starting Snyk Container scan..."
+          start_time=$(date +%s)
+          
+          # Run Snyk Container test
+          if [[ "${{ env.SNYK_CONTAINER_FAIL_ON_ISSUES }}" == "true" ]]; then
+            echo "❗ Pipeline will fail if high/critical issues are found"
+            snyk container test snyk-container-demo:latest --severity-threshold=high && SCAN_RESULT=0 || SCAN_RESULT=$?
+          else
+            echo "ℹ️ Pipeline will continue regardless of issues found (reporting only)"
+            snyk container test snyk-container-demo:latest || true
+            SCAN_RESULT=0
+          fi
+          
+          # Save results for HTML report generation
+          snyk container test snyk-container-demo:latest --json > snyk-container-results.json || true
+          
+          end_time=$(date +%s)
+          duration=$((end_time - start_time))
+          echo "🔥 SNYK CONTAINER SCAN COMPLETED IN: $duration SECONDS 🔥"
+          
+          # If scan failed due to vulnerabilities, provide clear message
+          if [[ $SCAN_RESULT -ne 0 ]]; then
+            echo ""
+            echo "❌ ==========================================="
+            echo "❌ SECURITY GATE BLOCKED THIS DEPLOYMENT"
+            echo "❌ High or Critical vulnerabilities detected!"
+            echo "❌ Fix the issues above before merging."
+            echo "❌ ==========================================="
+            echo ""
+            echo "💡 Tip: Download the HTML report below for detailed remediation guidance"
+          fi
+          
+          # Exit with the scan result AFTER we output the message
+          exit $SCAN_RESULT
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: 📋 Generate SBOMs (Multiple Formats)
+        if: always()
+        run: |
+          echo "⏱️ Starting SBOM generation..."
+          start_time=$(date +%s)
+          
+          echo "📋 Generating comprehensive SBOMs in multiple formats..."
+          mkdir -p sbom-artifacts
+          
+          # Generate CycloneDX 1.6 JSON (latest)
+          echo "🔄 Generating CycloneDX 1.6 JSON SBOM..."
+          snyk container sbom --format=cyclonedx1.6+json snyk-container-demo:latest > sbom-artifacts/sbom-cyclonedx-1.6.json
+          
+          # Generate CycloneDX 1.6 XML
+          echo "🔄 Generating CycloneDX 1.6 XML SBOM..."
+          snyk container sbom --format=cyclonedx1.6+xml snyk-container-demo:latest > sbom-artifacts/sbom-cyclonedx-1.6.xml
+          
+          # Generate CycloneDX 1.5 JSON (for compatibility)
+          echo "🔄 Generating CycloneDX 1.5 JSON SBOM..."
+          snyk container sbom --format=cyclonedx1.5+json snyk-container-demo:latest > sbom-artifacts/sbom-cyclonedx-1.5.json
+          
+          # Generate SPDX 2.3 JSON
+          echo "🔄 Generating SPDX 2.3 JSON SBOM..."
+          snyk container sbom --format=spdx2.3+json snyk-container-demo:latest > sbom-artifacts/sbom-spdx-2.3.json
+          
+          # Generate OS-only SBOM (excluding app dependencies)
+          echo "🔄 Generating OS-only SBOM..."
+          snyk container sbom --format=cyclonedx1.6+json --exclude-app-vulns snyk-container-demo:latest > sbom-artifacts/sbom-os-only.json
+          
+          # Generate summary
+          echo "📊 SBOM Generation Summary:" > sbom-artifacts/generation-summary.txt
+          echo "Generated $(ls sbom-artifacts/*.json sbom-artifacts/*.xml | wc -l) SBOM files:" >> sbom-artifacts/generation-summary.txt
+          ls -la sbom-artifacts/ >> sbom-artifacts/generation-summary.txt
+          
+          # Component counts
+          echo "" >> sbom-artifacts/generation-summary.txt
+          echo "Component counts:" >> sbom-artifacts/generation-summary.txt
+          echo "CycloneDX 1.6 JSON: $(jq '.components | length' sbom-artifacts/sbom-cyclonedx-1.6.json) components" >> sbom-artifacts/generation-summary.txt
+          echo "SPDX 2.3 JSON: $(jq '.packages | length' sbom-artifacts/sbom-spdx-2.3.json) packages" >> sbom-artifacts/generation-summary.txt
+          
+          cat sbom-artifacts/generation-summary.txt
+          
+          end_time=$(date +%s)
+          duration=$((end_time - start_time))
+          echo "🔥 SBOM GENERATION COMPLETED IN: $duration SECONDS 🔥"
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: 📡 Snyk Container Monitor (Monitoring Mode)
+        if: always()
+        run: |
+          echo "⏱️ Starting monitoring setup..."
+          start_time=$(date +%s)
+          
+          echo "📡 Setting up continuous monitoring..."
+          if snyk container monitor snyk-container-demo:latest --json > monitor-results.json; then
+            echo "✅ Container monitoring successfully configured"
+            
+            # Extract project URL if available
+            if [ -f "monitor-results.json" ]; then
+              PROJECT_URL=$(jq -r '.uri // "No project URL available"' monitor-results.json)
+              echo "📊 Monitor project URL: $PROJECT_URL"
+            fi
+          else
+            echo "⚠️ Container monitoring setup failed (this is normal for demo purposes)"
+          fi
+          
+          end_time=$(date +%s)
+          duration=$((end_time - start_time))
+          echo "🔥 MONITORING SETUP COMPLETED IN: $duration SECONDS 🔥"
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: 📊 Generate HTML Reports
+        if: always()
+        run: |
+          echo "📊 Generating HTML reports..."
+          TIMESTAMP=$(date +'%Y%m%d-%H%M%S')
+          
+          # Container scan report
+          CONTAINER_REPORT_NAME="${{ github.event.repository.name }}-snyk-container-report-${TIMESTAMP}.html"
+          if [ -f "snyk-container-results.json" ]; then
+            snyk-to-html -i snyk-container-results.json -o "${CONTAINER_REPORT_NAME}"
+            echo "✅ Container HTML report generated: ${CONTAINER_REPORT_NAME}"
+            echo "CONTAINER_REPORT_NAME=${CONTAINER_REPORT_NAME}" >> $GITHUB_ENV
+          fi
+          
+          # Dockerfile scan report
+          DOCKERFILE_REPORT_NAME="${{ github.event.repository.name }}-dockerfile-security-report-${TIMESTAMP}.html"
+          if [ -f "dockerfile-scan-results.json" ]; then
+            snyk-to-html -i dockerfile-scan-results.json -o "${DOCKERFILE_REPORT_NAME}"
+            echo "✅ Dockerfile HTML report generated: ${DOCKERFILE_REPORT_NAME}"
+            echo "DOCKERFILE_REPORT_NAME=${DOCKERFILE_REPORT_NAME}" >> $GITHUB_ENV
+          fi
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: 📤 Upload Container Scan HTML Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.repository.name }}-snyk-container-report
+          path: ${{ env.CONTAINER_REPORT_NAME }}
+
+      - name: 📤 Upload Dockerfile Scan HTML Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.repository.name }}-dockerfile-security-report
+          path: ${{ env.DOCKERFILE_REPORT_NAME }}
+
+      - name: 📤 Upload SBOM Collection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.repository.name }}-sbom-collection
+          path: sbom-artifacts/
+          retention-days: 90
+
+      - name: 📤 Upload Raw Scan Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.repository.name }}-raw-scan-results
+          path: |
+            snyk-container-results.json
+            dockerfile-scan-results.json
+            monitor-results.json
+
+      - name: 📥 Download Report Instructions
+        if: always()
+        run: |
+          echo "==========================================="
+          echo "📥 REPORTS AVAILABLE FOR DOWNLOAD"
+          echo "==========================================="
+          echo ""
+          echo "🛡️ CONTAINER SECURITY REPORTS:"
+          echo "1. Interactive HTML vulnerability report"
+          echo "2. Dockerfile security analysis report"
+          echo "3. Complete SBOM collection (5 formats)"
+          echo "4. Raw JSON scan results"
+          echo ""
+          echo "📦 HOW TO DOWNLOAD:"
+          echo "1. Scroll down to the bottom of this page"
+          echo "2. Find 'Artifacts' section"  
+          echo "3. Click on any report to download:"
+          echo "   - ${{ github.event.repository.name }}-snyk-container-report"
+          echo "   - ${{ github.event.repository.name }}-dockerfile-security-report"
+          echo "   - ${{ github.event.repository.name }}-sbom-collection"
+          echo "   - ${{ github.event.repository.name }}-raw-scan-results"
+          echo "4. Extract the ZIP file to view reports"
+          echo ""
+          echo "🌐 Direct link to this run:"
+          echo "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo ""
+          echo "📋 SBOM FORMATS INCLUDED:"
+          echo "- CycloneDX 1.6 (JSON & XML)"
+          echo "- CycloneDX 1.5 (JSON)"
+          echo "- SPDX 2.3 (JSON)"
+          echo "- OS-only SBOM (excluding app dependencies)"
+          echo ""
+          if [[ "${{ env.SNYK_CONTAINER_FAIL_ON_ISSUES }}" == "true" ]]; then
+            echo "🛡️ Security gate: ENABLED (blocking high/critical issues)"
+          else
+            echo "📊 Security gate: DISABLED (reporting only, not blocking)"
+          fi
+          echo ""
+          echo "🔥 SNYK CONTAINER DEMO COMPLETE! 🔥"
