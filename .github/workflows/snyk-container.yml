@@ -41,25 +41,17 @@ jobs:
         with:
           node-version: '20'
 
-      - name: 📦 Install snyk-to-html
+      - name: 🔍 Base Image Security Scan (Pre-Build)
         run: |
-          echo "📦 Installing snyk-to-html for report generation..."
-          npm install -g snyk-to-html
-
-      - name: 🔍 Dockerfile Security Scan (Pre-Build)
-        run: |
-          echo "⏱️ Starting Dockerfile security scan..."
+          echo "⏱️ Starting base image security scan..."
           start_time=$(date +%s)
           
-          echo "🔍 Scanning Dockerfile for container security issues before build..."
-          
-          # Run Dockerfile container scan
-          snyk container test --file=Dockerfile --json > dockerfile-scan-results.json || true
-          snyk container test --file=Dockerfile || true
+          echo "🔍 Scanning base image ubuntu:18.04 for vulnerabilities..."
+          snyk container test ubuntu:18.04 || true
           
           end_time=$(date +%s)
           duration=$((end_time - start_time))
-          echo "🔥 DOCKERFILE SCAN COMPLETED IN: $duration SECONDS 🔥"
+          echo "🔥 BASE IMAGE SCAN COMPLETED IN: $duration SECONDS 🔥"
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
@@ -68,12 +60,8 @@ jobs:
           echo "⏱️ Starting container build..."
           start_time=$(date +%s)
           
-          echo "🏗️ Building vulnerable container image for Snyk demo..."
+          echo "🏗️ Building container image for Snyk demo..."
           docker build -t snyk-container-demo:latest .
-          docker tag snyk-container-demo:latest snyk-container-demo:${{ github.sha }}
-          
-          echo "📊 Image details:"
-          docker images snyk-container-demo:latest
           
           end_time=$(date +%s)
           duration=$((end_time - start_time))
@@ -93,9 +81,6 @@ jobs:
             snyk container test snyk-container-demo:latest || true
             SCAN_RESULT=0
           fi
-          
-          # Save results for HTML report generation
-          snyk container test snyk-container-demo:latest --json > snyk-container-results.json || true
           
           end_time=$(date +%s)
           duration=$((end_time - start_time))
@@ -118,12 +103,26 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
-      - name: 📋 Generate SBOMs (Multiple Formats)
+      - name: 📊 Generate HTML Report
+        if: always()
+        run: |
+          echo "📊 Generating HTML report..."
+          TIMESTAMP=$(date +'%Y%m%d-%H%M%S')
+          REPORT_NAME="${{ github.event.repository.name }}-snyk-container-report-${TIMESTAMP}.html"
+          snyk container test snyk-container-demo:latest --json > snyk-container.json || true
+          npx snyk-to-html -i snyk-container.json -o "${REPORT_NAME}"
+          echo "✅ HTML report generated: ${REPORT_NAME}"
+          echo "REPORT_NAME=${REPORT_NAME}" >> $GITHUB_ENV
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: 📋 Generate SBOM (Multiple Formats)
+        if: always()
         run: |
           echo "⏱️ Starting SBOM generation..."
           start_time=$(date +%s)
           
-          echo "📋 Generating comprehensive SBOMs in multiple formats..."
+          echo "📋 Generating SBOMs in multiple formats..."
           mkdir -p sbom-artifacts
           
           # Generate CycloneDX 1.6 JSON (latest)
@@ -134,10 +133,6 @@ jobs:
           echo "🔄 Generating CycloneDX 1.6 XML SBOM..."
           snyk container sbom --format=cyclonedx1.6+xml snyk-container-demo:latest > sbom-artifacts/sbom-cyclonedx-1.6.xml
           
-          # Generate CycloneDX 1.5 JSON (for compatibility)
-          echo "🔄 Generating CycloneDX 1.5 JSON SBOM..."
-          snyk container sbom --format=cyclonedx1.5+json snyk-container-demo:latest > sbom-artifacts/sbom-cyclonedx-1.5.json
-          
           # Generate SPDX 2.3 JSON
           echo "🔄 Generating SPDX 2.3 JSON SBOM..."
           snyk container sbom --format=spdx2.3+json snyk-container-demo:latest > sbom-artifacts/sbom-spdx-2.3.json
@@ -147,15 +142,8 @@ jobs:
           snyk container sbom --format=cyclonedx1.6+json --exclude-app-vulns snyk-container-demo:latest > sbom-artifacts/sbom-os-only.json
           
           # Generate summary
-          echo "📊 SBOM Generation Summary:" > sbom-artifacts/generation-summary.txt
-          echo "Generated $(ls sbom-artifacts/*.json sbom-artifacts/*.xml | wc -l) SBOM files:" >> sbom-artifacts/generation-summary.txt
+          echo "📊 Generated $(ls sbom-artifacts/*.json sbom-artifacts/*.xml | wc -l) SBOM files" > sbom-artifacts/generation-summary.txt
           ls -la sbom-artifacts/ >> sbom-artifacts/generation-summary.txt
-          
-          # Component counts
-          echo "" >> sbom-artifacts/generation-summary.txt
-          echo "Component counts:" >> sbom-artifacts/generation-summary.txt
-          echo "CycloneDX 1.6 JSON: $(jq '.components | length' sbom-artifacts/sbom-cyclonedx-1.6.json) components" >> sbom-artifacts/generation-summary.txt
-          echo "SPDX 2.3 JSON: $(jq '.packages | length' sbom-artifacts/sbom-spdx-2.3.json) packages" >> sbom-artifacts/generation-summary.txt
           
           cat sbom-artifacts/generation-summary.txt
           
@@ -165,24 +153,14 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
-      - name: 📡 Snyk Container Monitor (Monitoring Mode)
+      - name: 📡 Container Monitor (Monitoring Mode)
         if: always()
         run: |
-          echo "⏱️ Starting monitoring setup..."
+          echo "⏱️ Starting container monitoring setup..."
           start_time=$(date +%s)
           
           echo "📡 Setting up continuous monitoring..."
-          if snyk container monitor snyk-container-demo:latest --json > monitor-results.json; then
-            echo "✅ Container monitoring successfully configured"
-            
-            # Extract project URL if available
-            if [ -f "monitor-results.json" ]; then
-              PROJECT_URL=$(jq -r '.uri // "No project URL available"' monitor-results.json)
-              echo "📊 Monitor project URL: $PROJECT_URL"
-            fi
-          else
-            echo "⚠️ Container monitoring setup failed (this is normal for demo purposes)"
-          fi
+          snyk container monitor snyk-container-demo:latest || echo "⚠️ Monitoring setup failed (normal for demo)"
           
           end_time=$(date +%s)
           duration=$((end_time - start_time))
@@ -190,43 +168,12 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
-      - name: 📊 Generate HTML Reports
+      - name: 📤 Upload HTML Report
         if: always()
-        run: |
-          echo "📊 Generating HTML reports..."
-          TIMESTAMP=$(date +'%Y%m%d-%H%M%S')
-          
-          # Container scan report
-          CONTAINER_REPORT_NAME="${{ github.event.repository.name }}-snyk-container-report-${TIMESTAMP}.html"
-          if [ -f "snyk-container-results.json" ]; then
-            snyk-to-html -i snyk-container-results.json -o "${CONTAINER_REPORT_NAME}"
-            echo "✅ Container HTML report generated: ${CONTAINER_REPORT_NAME}"
-            echo "CONTAINER_REPORT_NAME=${CONTAINER_REPORT_NAME}" >> $GITHUB_ENV
-          fi
-          
-          # Dockerfile scan report
-          DOCKERFILE_REPORT_NAME="${{ github.event.repository.name }}-dockerfile-security-report-${TIMESTAMP}.html"
-          if [ -f "dockerfile-scan-results.json" ]; then
-            snyk-to-html -i dockerfile-scan-results.json -o "${DOCKERFILE_REPORT_NAME}"
-            echo "✅ Dockerfile HTML report generated: ${DOCKERFILE_REPORT_NAME}"
-            echo "DOCKERFILE_REPORT_NAME=${DOCKERFILE_REPORT_NAME}" >> $GITHUB_ENV
-          fi
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-      - name: 📤 Upload Container Scan HTML Report
-        if: always() && env.CONTAINER_REPORT_NAME != ''
         uses: actions/upload-artifact@v4
         with:
           name: ${{ github.event.repository.name }}-snyk-container-report
-          path: ${{ env.CONTAINER_REPORT_NAME }}
-
-      - name: 📤 Upload Dockerfile Scan HTML Report
-        if: always() && env.DOCKERFILE_REPORT_NAME != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ github.event.repository.name }}-dockerfile-security-report
-          path: ${{ env.DOCKERFILE_REPORT_NAME }}
+          path: ${{ env.REPORT_NAME }}
 
       - name: 📤 Upload SBOM Collection
         if: always()
@@ -234,17 +181,6 @@ jobs:
         with:
           name: ${{ github.event.repository.name }}-sbom-collection
           path: sbom-artifacts/
-          retention-days: 90
-
-      - name: 📤 Upload Raw Scan Results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ github.event.repository.name }}-raw-scan-results
-          path: |
-            snyk-container-results.json
-            dockerfile-scan-results.json
-            monitor-results.json
 
       - name: 📥 Download Report Instructions
         if: always()
@@ -255,28 +191,23 @@ jobs:
           echo ""
           echo "🛡️ CONTAINER SECURITY REPORTS:"
           echo "1. Interactive HTML vulnerability report"
-          echo "2. Dockerfile security analysis report"
-          echo "3. Complete SBOM collection (5 formats)"
-          echo "4. Raw JSON scan results"
+          echo "2. Complete SBOM collection (4 formats)"
           echo ""
           echo "📦 HOW TO DOWNLOAD:"
           echo "1. Scroll down to the bottom of this page"
           echo "2. Find 'Artifacts' section"  
-          echo "3. Click on any report to download:"
+          echo "3. Click on reports to download:"
           echo "   - ${{ github.event.repository.name }}-snyk-container-report"
-          echo "   - ${{ github.event.repository.name }}-dockerfile-security-report"
           echo "   - ${{ github.event.repository.name }}-sbom-collection"
-          echo "   - ${{ github.event.repository.name }}-raw-scan-results"
           echo "4. Extract the ZIP file to view reports"
-          echo ""
-          echo "🌐 Direct link to this run:"
-          echo "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           echo ""
           echo "📋 SBOM FORMATS INCLUDED:"
           echo "- CycloneDX 1.6 (JSON & XML)"
-          echo "- CycloneDX 1.5 (JSON)"
           echo "- SPDX 2.3 (JSON)"
           echo "- OS-only SBOM (excluding app dependencies)"
+          echo ""
+          echo "🌐 Direct link to this run:"
+          echo "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           echo ""
           if [[ "${{ env.SNYK_CONTAINER_FAIL_ON_ISSUES }}" == "true" ]]; then
             echo "🛡️ Security gate: ENABLED (blocking high/critical issues)"

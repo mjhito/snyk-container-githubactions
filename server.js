@@ -1,7 +1,4 @@
 const express = require('express');
-const bodyParser = require('body-parser');
-const cookieParser = require('cookie-parser');
-const session = require('express-session');
 const path = require('path');
 const fs = require('fs');
 const { exec } = require('child_process');
@@ -10,15 +7,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(cookieParser());
-app.use(session({
-  secret: 'hardcoded-secret-key', // Vulnerable: hardcoded secret
-  resave: false,
-  saveUninitialized: true,
-  cookie: { secure: false } // Vulnerable: not secure in production
-}));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Serve static files
 app.use(express.static('public'));
