@@ -177,7 +177,7 @@ jobs:
           echo "📊 Setting up SBOM continuous monitoring..."
           # Monitor the main SBOM file for ongoing vulnerability tracking
           if [ -f "sbom-artifacts/sbom-cyclonedx-1.6.json" ]; then
-            snyk sbom monitor sbom-artifacts/sbom-cyclonedx-1.6.json || echo "⚠️ SBOM monitoring setup failed (normal for demo)"
+            snyk sbom monitor sbom-artifacts/sbom-cyclonedx-1.6.json --experimental || echo "⚠️ SBOM monitoring setup failed (normal for demo)"
             echo "✅ SBOM monitoring configured for CycloneDX 1.6 JSON"
           else
             echo "⚠️ No SBOM file found for monitoring"
