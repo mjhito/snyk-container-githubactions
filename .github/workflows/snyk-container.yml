@@ -18,7 +18,7 @@ jobs:
       # EU: https://api.eu.snyk.io
       # AU: https://api.au.snyk.io
       ###############################################################
-      SNYK_API: https://api.snyk.io
+      SNYK_API: https://api.us.snyk.io
       
       ###############################################################
       # Set to true to fail the pipeline on high/critical severity issues (default: false)
