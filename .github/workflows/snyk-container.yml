@@ -168,27 +168,6 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
-      - name: 📊 SBOM Monitor (SBOM Monitoring Mode)
-        if: always()
-        run: |
-          echo "⏱️ Starting SBOM monitoring setup..."
-          start_time=$(date +%s)
-          
-          echo "📊 Setting up SBOM continuous monitoring..."
-          # Monitor the main SBOM file for ongoing vulnerability tracking
-          if [ -f "sbom-artifacts/sbom-cyclonedx-1.6.json" ]; then
-            snyk sbom monitor sbom-artifacts/sbom-cyclonedx-1.6.json --experimental || echo "⚠️ SBOM monitoring setup failed (normal for demo)"
-            echo "✅ SBOM monitoring configured for CycloneDX 1.6 JSON"
-          else
-            echo "⚠️ No SBOM file found for monitoring"
-          fi
-          
-          end_time=$(date +%s)
-          duration=$((end_time - start_time))
-          echo "🔥 SBOM MONITORING SETUP COMPLETED IN: $duration SECONDS 🔥"
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
       - name: 📤 Upload HTML Report
         if: always()
         uses: actions/upload-artifact@v4
