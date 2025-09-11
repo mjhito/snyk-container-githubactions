@@ -25,7 +25,7 @@ jobs:
       # By default, the scan continues even if issues are found (exit code 0)
       # To fail on high/critical issues, set SNYK_CONTAINER_FAIL_ON_ISSUES: true above
       ###############################################################
-      SNYK_CONTAINER_FAIL_ON_ISSUES: false
+      SNYK_CONTAINER_FAIL_ON_ISSUES: true
     steps:
       - name: 📥 Checkout code
         uses: actions/checkout@v4
